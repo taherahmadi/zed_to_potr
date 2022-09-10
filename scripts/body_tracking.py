@@ -23,6 +23,7 @@
    modelised skeleton in an OpenGL window
 """
 from audioop import avg
+from unicodedata import name
 from unittest import skip
 from xml.dom.pulldom import default_bufsize
 import cv2
@@ -46,6 +47,8 @@ import tf.transformations as tr
 import time
 import math
 from numpy_ros import to_numpy, to_message
+import signal
+import threading
 
 
 pose_buffer = []
@@ -111,33 +114,14 @@ class zed_to_potr():
             # print(predictions_global_frame[19,:,:])
                     
             print("a")
-    
-    def __init__(self):
-        print("Running Body Tracking sample ... Press 'q' to quit")
 
-        # Create a Camera object
-        zed = sl.Camera()
+    def signal_handler(self, signal, frame):
+        self.stop_signal
+        self.stop_signal=True
+        time.sleep(0.5)
+        exit()
 
-        # Create a InitParameters object and set configuration parameters
-        init_params = sl.InitParameters()
-        init_params.camera_resolution = sl.RESOLUTION.HD1080  # Use HD1080 video mode
-        init_params.coordinate_units = sl.UNIT.METER          # Set coordinate units
-        init_params.depth_mode = sl.DEPTH_MODE.ULTRA
-        # init_params.coordinate_system = sl.COORDINATE_SYSTEM.RIGHT_HANDED_Y_DOWN
-        init_params.coordinate_system=sl.COORDINATE_SYSTEM.RIGHT_HANDED_Y_UP # for ROS coordinate system
-        
-        # If applicable, use the SVO given as parameter
-        # Otherwise use ZED live stream
-        if len(sys.argv) == 2:
-            filepath = sys.argv[1]
-            print("Using SVO file: {0}".format(filepath))
-            init_params.svo_real_time_mode = True
-            init_params.set_from_svo_file(filepath)
-
-        # Open the camera
-        err = zed.open(init_params)
-        if err != sl.ERROR_CODE.SUCCESS:
-            exit(1)
+    def get_poses(self, zed, zed_name, index):
 
         # Enable Positional tracking (mandatory for object detection)
         positional_tracking_parameters = sl.PositionalTrackingParameters()
@@ -180,17 +164,15 @@ class zed_to_potr():
         runtime_params = sl.RuntimeParameters()
         runtime_params.measure3D_reference_frame = sl.REFERENCE_FRAME.WORLD
 
-        #ros node initialization 
-        rospy.init_node('pose_publisher', anonymous=True)
-        publisher = rospy.Publisher('/pose_publisher/3DSkeletonBuffer', Skeleton3DBuffer, queue_size=10)
-        rospy.Subscriber('/potrtr/predictions', Skeleton3DBuffer, self.predictions_eval)
+        publisher = rospy.Publisher('/'+zed_name+'/pose_publisher/3DSkeletonBuffer', Skeleton3DBuffer, queue_size=10)
+        rospy.Subscriber('/'+zed_name+'/potrtr/predictions', Skeleton3DBuffer, self.predictions_eval)
 
         self.pc1_publisher = []
         self.pc2_publisher = []
         for i in range(5):
-            self.pc1_publisher.append(rospy.Publisher('/pose_publisher/skeleton'+str(i), PointCloud, queue_size=10))
+            self.pc1_publisher.append(rospy.Publisher('/'+zed_name+'/pose_publisher/skeleton'+str(i), PointCloud, queue_size=10))
         for i in range(20):
-            self.pc2_publisher.append(rospy.Publisher('/pose_publisher/pred'+str(i), PointCloud, queue_size=10))
+            self.pc2_publisher.append(rospy.Publisher('/'+zed_name+'/pose_publisher/pred'+str(i), PointCloud, queue_size=10))
         
         # pose_buffer = []
         dt_buffer = []
@@ -265,15 +247,15 @@ class zed_to_potr():
                     br.sendTransform( camera_translation, # bodies.object_list[0].keypoint[0], # translation
                                     camera_orientation, # bodies.object_list[0].global_root_orientation, # (x, y, z, w) rotation
                                     rospy.Time.now(),
-                                    'camera',
-                                    'world')
+                                    'camera'+str(index),
+                                    'world'+str(index))
                     h2w_R = np.eye(4)
                     h2w_R[:3,:3] = human_to_world_rotation
                     br.sendTransform( human_to_world_translation, # Human frame translation realtive to World
                                     tr.quaternion_from_matrix(h2w_R), # bodies.object_list[0].global_root_orientation, # (x, y, z, w) rotation
                                     rospy.Time.now(),
-                                    'skeleton_17_pc',
-                                    'world')
+                                    'skeleton_17_pc'+str(index),
+                                    'world'+str(index))
                 
 
                     # change skeleton data here
@@ -288,38 +270,33 @@ class zed_to_potr():
                 #     pose_buffer.pop(0)
                 #     dt_buffer.pop(0)
 
-                # if elapsed time is 0.5 sec
-                if True:
-                # if (time.time()- time0) >= 0.5:
-                #     time0 = time.time()
 
+                if len(pose_buffer)>=output_size:
+                    avg_framerate = 1/np.mean(dt_buffer)
+                    print("avg frame rate of ", index," : ",  avg_framerate)
+                    k = max(1,math.floor(avg_framerate/desired_framerate))
 
-                    if len(pose_buffer)>=output_size:
-                        avg_framerate = 1/np.mean(dt_buffer)
-                        print("avg frame rate: ", avg_framerate)
-                        k = max(1,math.floor(avg_framerate/desired_framerate))
+                    for i in range(5):
+                        self.pc1_publisher[i].publish(get_point_clouds(np.array(pose_buffer[-k*output_size:][i]), relative_to="world"))
 
-                        for i in range(5):
-                            self.pc1_publisher[i].publish(get_point_clouds(np.array(pose_buffer[-k*output_size:][i]), relative_to="world"))
+                    pose_buffer_msg = Skeleton3DBuffer()
+                    array_msg =  Float64MultiArray()
+                    output_buffer = get_3dpose_in_camera_frame(np.array(pose_buffer[-k*output_size:]), Transform=W_to_C_T)
+                    # output_buffer = np.array(pose_buffer[-k*output_size:])
+                    print(output_buffer.shape)
+                    output_buffer_shape = output_buffer.shape
+                    array_msg.data = output_buffer.flatten()
+                    # array_msg.layout.data_offset =  0 # no padding
+                    # dim = []
+                    # dim.append(MultiArrayDimension("points", n, 3*n))
+                    # dim.append(MultiArrayDimension("coords", 3, 1))
+                    # array_msg.layout.dim = dim
 
-                        pose_buffer_msg = Skeleton3DBuffer()
-                        array_msg =  Float64MultiArray()
-                        output_buffer = get_3dpose_in_camera_frame(np.array(pose_buffer[-k*output_size:]), Transform=W_to_C_T)
-                        # output_buffer = np.array(pose_buffer[-k*output_size:])
-                        print(output_buffer.shape)
-                        output_buffer_shape = output_buffer.shape
-                        array_msg.data = output_buffer.flatten()
-                        # array_msg.layout.data_offset =  0 # no padding
-                        # dim = []
-                        # dim.append(MultiArrayDimension("points", n, 3*n))
-                        # dim.append(MultiArrayDimension("coords", 3, 1))
-                        # array_msg.layout.dim = dim
-
-                        pose_buffer_msg.skeleton_3d_17_flat = array_msg
-                        pose_buffer_msg.shape = output_buffer_shape
-                        pose_buffer_msg.seq = list(range(len(pose_buffer)-k*output_size, len(pose_buffer)))
-                        transfrom_for_seq[pose_buffer_msg.seq[-1]] = C_to_W_T
-                        publisher.publish(pose_buffer_msg)
+                    pose_buffer_msg.skeleton_3d_17_flat = array_msg
+                    pose_buffer_msg.shape = output_buffer_shape
+                    pose_buffer_msg.seq = list(range(len(pose_buffer)-k*output_size, len(pose_buffer)))
+                    transfrom_for_seq[pose_buffer_msg.seq[-1]] = C_to_W_T
+                    publisher.publish(pose_buffer_msg)
                 
 
                 # Update GL view
@@ -332,8 +309,85 @@ class zed_to_potr():
 
         # viewer.exit()
 
-        rospy.spin()
-        image.free(sl.MEM.CPU)
+    def grab_run(self, index, name):
+        # self.stop_signal
+        # self.zed_list
+        # self.timestamp_list
+
+        runtime = sl.RuntimeParameters()
+        while not self.stop_signal:
+            err = self.zed_list[index].grab(runtime)
+            if err == sl.ERROR_CODE.SUCCESS:
+                self.get_poses(self.zed_list[index],zed_name=name.split()[-1], index=index )
+            time.sleep(0.001) #1ms
+        self.zed_list[index].close()
+
+
+    def __init__(self):
+        self.stop_signal = False
+        self.zed_list = []
+        self.timestamp_list = []
+        self.thread_list = []
+
+        #ros node initialization 
+        rospy.init_node('pose_publisher', anonymous=True)
+
+
+        print("Running Body Tracking sample ... Press 'q' to quit")
+
+        # Create a Camera object
+        zed = sl.Camera()
+
+        # Create a InitParameters object and set configuration parameters
+        init_params = sl.InitParameters()
+        init_params.camera_resolution = sl.RESOLUTION.HD1080  # Use HD1080 video mode
+        init_params.coordinate_units = sl.UNIT.METER          # Set coordinate units
+        init_params.depth_mode = sl.DEPTH_MODE.ULTRA
+        # init_params.coordinate_system = sl.COORDINATE_SYSTEM.RIGHT_HANDED_Y_DOWN
+        init_params.coordinate_system=sl.COORDINATE_SYSTEM.RIGHT_HANDED_Y_UP # for ROS coordinate system
+        signal.signal(signal.SIGINT, self.signal_handler)
+
+        print("Running...")
+        init = sl.InitParameters()
+        init.camera_resolution = sl.RESOLUTION.HD720
+        init.camera_fps = 30  # The framerate is lowered to avoid any USB3 bandwidth issues
+
+        #List and open cameras
+        name_list = []
+        last_ts_list = []
+        cameras = sl.Camera.get_device_list()
+        index = 0
+        for cam in cameras:
+            init.set_from_serial_number(cam.serial_number)
+            name_list.append("ZED {}".format(cam.serial_number))
+            print("Opening {}".format(name_list[index]))
+            self.zed_list.append(sl.Camera())
+            self.timestamp_list.append(0)
+            last_ts_list.append(0)
+            status = self.zed_list[index].open(init)
+            if status != sl.ERROR_CODE.SUCCESS:
+                print(repr(status))
+                self.zed_list[index].close()
+            index = index +1
+        
+            #Start camera threads
+        for index in range(0, len(self.zed_list)):
+            if self.zed_list[index].is_opened():
+                self.thread_list.append(threading.Thread(target=self.grab_run, args=(index, name_list[index])))
+                self.thread_list[index].start()
+
+        # If applicable, use the SVO given as parameter
+        # Otherwise use ZED live stream
+        # if len(sys.argv) == 2:
+        #     filepath = sys.argv[1]
+        #     print("Using SVO file: {0}".format(filepath))
+        #     init_params.svo_real_time_mode = True
+        #     init_params.set_from_svo_file(filepath)
+
+
+        while True:
+            rospy.spin()
+        # image.free(sl.MEM.CPU)
         # Disable modules and close camera
         zed.disable_object_detection()
         zed.disable_positional_tracking()
@@ -508,7 +562,6 @@ def pose_transform(skeleton_buffer, Transform):
     skeleton_buffer = np.transpose(skeleton_buffer_t)
     skeleton_buffer = np.reshape(skeleton_buffer, (skeleton_buffer_shape[0],skeleton_buffer_shape[1],skeleton_buffer_shape[2]))
     return skeleton_buffer[:,:,:3]
-
 
 
 if __name__ == "__main__":
