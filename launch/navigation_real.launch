@@ -1,0 +1,100 @@
+<launch>
+  <arg name="base_frame" value="base_robot" />
+  <arg name="odom_frame" value="world" />
+  <arg name="map_frame" value="world" />
+  <arg name="agent_num" value="0" />
+  <arg name="odom_topic" default="odom" />
+
+  <arg name="use_global" default="true"/>
+  <arg name="use_trajectory" default="false"/>
+  <arg name="use_teb" default="true"/>
+  <arg name="use_dwa" default="false"/>
+
+
+  <!-- node pkg="gmapping" type="slam_gmapping" name="slam_gmapping" output="screen">
+    <param name="odom_frame" value="$(arg odom_frame)"/>
+    <param name="base_frame" value="$(arg base_frame)"/>
+    <param name="map_frame" value="$(arg map_frame)"/>
+    <param name="map_update_interval" value="0.1"/>
+    <param name="particles" value="40" />
+    <param name="delta" value="0.02"/>
+    <param name="maxRange" value="4"/>
+    <param name="xmin" value="-12"/>
+    <param name="ymin" value="-12"/>
+    <param name="xmax" value="12"/>
+    <param name="ymax" value="12"/>
+    <remap from="/scan" to="/turtlebot2/scan" />
+    <rosparam command="load" file="$(find follow_ahead_rl)/config_nav/mapper_params.yaml" />
+  </node-->
+  <node pkg="tf" type="static_transform_publisher" name="link1_broadcaster" args="0 0 0 0 0 1 0 camera base_robot 100" />
+  <!-- <node pkg="k" type="static_transform_publisher" name="link2_broadcaster" args="0 0 0 0 0 0 1 camera turtlebot2/odom 100" />
+  <node pkg="tf" type="static_transform_publisher" name="link3_broadcaster" args="0 0 0 0 0 0 1 odom turtlebot1/odom 100" /> -->
+   <!-- global planner -->
+  <arg name="base_global_planner" default="global_planner/GlobalPlanner" if="$(arg use_global)">
+    <param name="publish_potential" value="True"/>
+    <param name="allow_unknown" value="true"/>
+    <param name="default_tolerance" value="0.1"/>
+    <param name="visualize_potential" value="false"/>
+    <param name="use_dijkstra" value="false"/>
+    <param name="use_quadratic" value="false"/>
+    <param name="old_navfn_behavior" value="false"/>
+    <param name="orientation_window_size" value="3"/>
+  </arg>
+  <arg name="base_local_planner" default="teb_local_planner/TebLocalPlannerROS" if="$(arg use_teb)"/>
+  <arg name="base_local_planner" default="base_local_planner/TrajectoryPlannerROS" if="$(arg use_trajectory)"/>
+  <arg name="base_local_planner" default="dwa_local_planner/DWAPlannerROS" if="$(arg use_dwa)"/>
+  <arg name="base_global_planner" default="navfn/NavfnROS" unless="$(arg use_global)"/>
+  <node pkg="move_base" type="move_base" respawn="false" name="move_base_node_0" output="screen">
+    <param name="footprint_padding" value="0.05" />
+    <param name="controller_frequency" value="20.0" />
+    <param name="controller_patience" value="15.0" />
+    <param name="recovery_behavior_enabled" value="true" />
+    <remap from="/cmd_vel" to="/cmd_vel_agent" />
+    <remap from="/move_base/cancel" to="/move_base_$(arg agent_num)/cancel" />
+    <remap from="/move_base/feedback" to="/move_base_$(arg agent_num)/feedback" />
+    <remap from="/move_base/goal" to="/move_base_$(arg agent_num)/goal" />
+    <remap from="/move_base/result" to="/move_base_$(arg agent_num)/result" />
+    <remap from="/move_base/status" to="/move_base_$(arg agent_num)/status" />
+
+    <param name="local_costmap/global_frame" value="$(arg odom_frame)" />
+    <param name="local_costmap/local_frame" value="$(arg base_frame)" />
+    <param name="global_costmap/global_frame" value="$(arg odom_frame)" />
+    <param name="global_costmap/local_frame" value="$(arg base_frame)" />
+    <rosparam file="$(find follow_ahead_rl)/config_nav/costmap_common_params.yaml" command="load" ns="global_costmap" />
+    <rosparam file="$(find follow_ahead_rl)/config_nav/costmap_common_params.yaml" command="load" ns="local_costmap" />
+    <rosparam file="$(find follow_ahead_rl)/config_nav/local_costmap_params.yaml" command="load" />
+    <rosparam file="$(find follow_ahead_rl)/config_nav/global_costmap_params.yaml" command="load" />
+
+    <!-- Costmap common param (for both local and global) -->
+    <param name="local_costmap/robot_base_frame" value="$(arg base_frame)" />
+    <!--param name="local_costmap/obstacles_laser/laser_sensor/sensor_frame" value="$(arg scan_frame)" />
+    <param name="local_costmap/obstacles_laser/laser_sensor/topic" value="$(arg scan_topic)" />
+    <param name="global_costmap/obstacles_laser/laser_sensor/sensor_frame" value="$(arg scan_frame)" />
+    <param name="global_costmap/obstacles_laser/laser_sensor/topic" value="$(arg scan_topic)" /-->
+    <param name="global_costmap/robot_base_frame" value="$(arg base_frame)" />
+
+
+    <!-- Local planner -->
+    <param name="TebLocalPlannerROS/odom_topic" value="$(arg odom_topic)" />
+    <param name="DWAPlannerROS/odom_topic" value="$(arg odom_topic)" />
+    <param name="TrajectoryPlannerROS/odom_topic" value="$(arg odom_topic)" />
+    <param name="base_local_planner" value="$(arg base_local_planner)" />
+    <param name="base_global_planner" value="$(arg base_global_planner)" />
+
+    <!-- For default base planner -->
+    <!-- <rosparam file="$(find follow_ahead_rl)/config_nav_pioneer/base_local_planner_params.yaml" command="load" /> -->
+
+    <!-- For teb base planner -->
+    <rosparam file="$(find follow_ahead_rl)/config_nav/teb_local_planner_params.yaml" command="load" if="$(arg use_teb)" />
+    <rosparam file="$(find follow_ahead_rl)/config_nav/planner.yaml" command="load" unless="$(arg use_teb)" />
+
+  </node>
+
+  <!--node name="standalone_converter_$(arg agent_num)" pkg="costmap_converter" type="standalone_converter" output="screen">
+    <param name="converter_plugin" value="costmap_converter::CostmapToDynamicObstacles" />
+    <param name="costmap_topic" value="/move_base_node_$(arg agent_num)/local_costmap/costmap" />
+    <param name="odom_topic" value="$(arg odom_topic)" />
+    <remap from="/move_base/local_costmap/costmap_updates" to="/move_base_node_$(arg agent_num)/local_costmap/costmap_updates" />
+  </node-->
+
+</launch>

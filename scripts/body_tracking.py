@@ -45,7 +45,6 @@ import tf
 import tf.transformations as tr
 import time
 import math
-from numpy_ros import to_numpy, to_message
 
 
 pose_buffer = []
@@ -124,7 +123,7 @@ class zed_to_potr():
         init_params.coordinate_units = sl.UNIT.METER          # Set coordinate units
         init_params.depth_mode = sl.DEPTH_MODE.ULTRA
         # init_params.coordinate_system = sl.COORDINATE_SYSTEM.RIGHT_HANDED_Y_DOWN
-        init_params.coordinate_system=sl.COORDINATE_SYSTEM.RIGHT_HANDED_Y_UP # for ROS coordinate system
+        init_params.coordinate_system=sl.COORDINATE_SYSTEM.RIGHT_HANDED_Z_UP # for ROS coordinate system
         
         # If applicable, use the SVO given as parameter
         # Otherwise use ZED live stream
@@ -218,18 +217,26 @@ class zed_to_potr():
                 # if i < 90:
                 #     continue
 
+                # Get the pose of the camera relative to the world frame
+                camera_pose = sl.Pose()
+                py_translation = sl.Translation()
+                state = zed.get_position(camera_pose, sl.REFERENCE_FRAME.WORLD)
+                # camera odom
+                camera_translation = camera_pose.get_translation(py_translation).get() 
+                # print("Camera Translation: ", camera_translation)
+                # orientation quaternion
+                py_orientation = sl.Orientation()
+                camera_orientation = camera_pose.get_orientation(py_orientation).get()
+
+                br = tf.TransformBroadcaster()
+                br.sendTransform( camera_translation, # bodies.object_list[0].keypoint[0], # translation
+                                camera_orientation, # bodies.object_list[0].global_root_orientation, # (x, y, z, w) rotation
+                                rospy.Time.now(),
+                                'camera',
+                                'world')
                 if len(bodies.object_list)==1:
 
-                    # Get the pose of the camera relative to the world frame
-                    camera_pose = sl.Pose()
-                    py_translation = sl.Translation()
-                    state = zed.get_position(camera_pose, sl.REFERENCE_FRAME.WORLD)
                     # translation
-                    camera_translation = camera_pose.get_translation(py_translation).get() 
-                    # print("Camera Translation: ", camera_translation)
-                    # orientation quaternion
-                    py_orientation = sl.Orientation()
-                    camera_orientation = camera_pose.get_orientation(py_orientation).get()
                     # print("Camera Orientation: ", camera_orientation)
 
                     # Camera to World homogeneous transformation matrix
@@ -261,12 +268,7 @@ class zed_to_potr():
                     # human_to_camera_rotation = H_to_C_T[:3,:3]
                     # human_to_camera_translation = H_to_C_T[:3,3]
 
-                    br = tf.TransformBroadcaster()
-                    br.sendTransform( camera_translation, # bodies.object_list[0].keypoint[0], # translation
-                                    camera_orientation, # bodies.object_list[0].global_root_orientation, # (x, y, z, w) rotation
-                                    rospy.Time.now(),
-                                    'camera',
-                                    'world')
+
                     h2w_R = np.eye(4)
                     h2w_R[:3,:3] = human_to_world_rotation
                     br.sendTransform( human_to_world_translation, # Human frame translation realtive to World
