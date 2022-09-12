@@ -181,15 +181,16 @@ class zed_to_potr():
 
         #ros node initialization 
         rospy.init_node('pose_publisher', anonymous=True)
-        publisher = rospy.Publisher('/pose_publisher/3DSkeletonBuffer', Skeleton3DBuffer, queue_size=10)
+        publisher = rospy.Publisher('/pose_publisher/3DSkeletonBuffer', Skeleton3DBuffer, queue_size=1)
         rospy.Subscriber('/potrtr/predictions', Skeleton3DBuffer, self.predictions_eval)
-
+        # rospy.Subscriber('/cmd_vel_mux/input/teleop', Skeleton3DBuffer, self.predictions_eval)
+        # publisher_velocity = rospy.Publisher('/cmd_vel_mux/input/teleo', Skeleton3DBuffer, queue_size=1) 
         self.pc1_publisher = []
         self.pc2_publisher = []
         for i in range(5):
-            self.pc1_publisher.append(rospy.Publisher('/pose_publisher/skeleton'+str(i), PointCloud, queue_size=10))
+            self.pc1_publisher.append(rospy.Publisher('/pose_publisher/skeleton'+str(i), PointCloud, queue_size=1))
         for i in range(20):
-            self.pc2_publisher.append(rospy.Publisher('/pose_publisher/pred'+str(i), PointCloud, queue_size=10))
+            self.pc2_publisher.append(rospy.Publisher('/pose_publisher/pred'+str(i), PointCloud, queue_size=1))
         
         # pose_buffer = []
         dt_buffer = []
@@ -286,43 +287,43 @@ class zed_to_potr():
                     # pc2_publisher.publish(get_point_clouds(bodies.object_list[0], W_to_C_T, br, relative_to="camera"))
 
 
-                # if len(pose_buffer)>buffer_size:
-                #     pose_buffer.pop(0)
-                #     dt_buffer.pop(0)
 
-                # if elapsed time is 0.5 sec
-                if True:
-                # if (time.time()- time0) >= 0.5:
-                #     time0 = time.time()
+                    # if elapsed time is 0.5 sec
+                    if True:
+                    # (time.time()- time0) >= 0.08:
+                    #     time0 = time.time()
 
+                        if len(pose_buffer)>=output_size:
+                            avg_framerate = 1/np.mean(dt_buffer)
+                            print("avg frame rate: ", avg_framerate)
+                            k = max(1,math.floor(avg_framerate/desired_framerate))
 
-                    if len(pose_buffer)>=output_size:
-                        avg_framerate = 1/np.mean(dt_buffer)
-                        print("avg frame rate: ", avg_framerate)
-                        k = max(1,math.floor(avg_framerate/desired_framerate))
+                            for i in range(5):
+                                # TODO; this was wrong, we need to fix it for different frame rate
+                                # print(pose_buffer[-output_size+i].shape)
+                                # new_pose_in_camera = pose_transform(pose_buffer[-output_size+i].reshape(1, 17, 3), C_to_W_T)
 
-                        for i in range(5):
-                            self.pc1_publisher[i].publish(get_point_clouds(np.array(pose_buffer[-k*output_size:][i]), relative_to="world"))
+                                self.pc1_publisher[i].publish(get_point_clouds(np.array(pose_buffer[-output_size+i]), relative_to="world"))
 
-                        pose_buffer_msg = Skeleton3DBuffer()
-                        array_msg =  Float64MultiArray()
-                        output_buffer = get_3dpose_in_camera_frame(np.array(pose_buffer[-k*output_size:]), Transform=W_to_C_T)
-                        # output_buffer = np.array(pose_buffer[-k*output_size:])
-                        print(output_buffer.shape)
-                        output_buffer_shape = output_buffer.shape
-                        array_msg.data = output_buffer.flatten()
-                        # array_msg.layout.data_offset =  0 # no padding
-                        # dim = []
-                        # dim.append(MultiArrayDimension("points", n, 3*n))
-                        # dim.append(MultiArrayDimension("coords", 3, 1))
-                        # array_msg.layout.dim = dim
+                            pose_buffer_msg = Skeleton3DBuffer()
+                            array_msg =  Float64MultiArray()
+                            output_buffer = get_3dpose_in_camera_frame(np.array(pose_buffer[-1*output_size:]), Transform=W_to_C_T)
+                            # output_buffer = np.array(pose_buffer[-k*output_size:])
+                            print(output_buffer.shape)
+                            output_buffer_shape = output_buffer.shape
+                            array_msg.data = output_buffer.flatten()
+                            # array_msg.layout.data_offset =  0 # no padding
+                            # dim = []
+                            # dim.append(MultiArrayDimension("points", n, 3*n))
+                            # dim.append(MultiArrayDimension("coords", 3, 1))
+                            # array_msg.layout.dim = dim
 
-                        pose_buffer_msg.skeleton_3d_17_flat = array_msg
-                        pose_buffer_msg.shape = output_buffer_shape
-                        pose_buffer_msg.seq = list(range(len(pose_buffer)-k*output_size, len(pose_buffer)))
-                        transfrom_for_seq[pose_buffer_msg.seq[-1]] = C_to_W_T
-                        publisher.publish(pose_buffer_msg)
-                
+                            pose_buffer_msg.skeleton_3d_17_flat = array_msg
+                            pose_buffer_msg.shape = output_buffer_shape
+                            pose_buffer_msg.seq = list(range(len(pose_buffer)-1*output_size, len(pose_buffer)))
+                            transfrom_for_seq[pose_buffer_msg.seq[-1]] = C_to_W_T
+                            publisher.publish(pose_buffer_msg)
+                    
 
                 # Update GL view
                 # viewer.update_view(image, bodies) 
