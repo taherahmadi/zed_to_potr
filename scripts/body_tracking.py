@@ -225,9 +225,16 @@ class zed_to_potr():
                 self.time_retrieve = time.time()
 
 
-                if len(bodies.object_list)==1:
-                    C_to_W_T = self.publish_skeleton_tf(bodies, camera_translation, camera_orientation)
-                    self.publish_17skeleton(bodies, C_to_W_T)
+                if len(bodies.object_list)>0:
+                    body_index = 0
+                    if len(bodies.object_list)>1 and len(self.pose_buffer)>1:
+                        temp = self.pose_buffer[-1]
+                        dif = []
+                        for body in bodies.object_list:
+                            dif.append(np.sum((np.array(temp[0])-np.array(body.keypoint[0]))**2, axis=0))
+                        body_index = dif.index(min(dif))
+                    C_to_W_T = self.publish_skeleton_tf(bodies, camera_translation, camera_orientation, body_index=body_index)
+                    self.publish_17skeleton(bodies, C_to_W_T, body_index=body_index)
 
                 # Update GL view
                 # viewer.update_view(image, bodies) 
@@ -246,12 +253,12 @@ class zed_to_potr():
         self.zed.disable_positional_tracking()
         self.zed.close()
 
-    def publish_17skeleton(self, bodies, C_to_W_T):
+    def publish_17skeleton(self, bodies, C_to_W_T, body_index=0):
 
         W_to_C_T = np.linalg.inv(C_to_W_T) # Pose of frame World relative to frame Camera
 
         # change skeleton data here
-        self.pose_buffer.append(zed32_to_17_format(bodies.object_list[0].keypoint))
+        self.pose_buffer.append(zed32_to_17_format(bodies.object_list[body_index].keypoint))
         self.pose_buffer = self.pose_buffer[-25:]
 
         self.dt_buffer.append(time.time()-self.time_frame_rate)
@@ -285,7 +292,7 @@ class zed_to_potr():
             self.skeleton_publisher.publish(pose_buffer_msg)
 
 
-    def publish_skeleton_tf(self, bodies, camera_translation, camera_orientation):
+    def publish_skeleton_tf(self, bodies, camera_translation, camera_orientation, body_index=0):
         # Camera to World homogeneous transformation matrix
         C_to_W_T = np.eye(4) # Pose of frame Camera relative to frame w
         camera_rotation = quaternion_to_rotation_matrix(camera_orientation)
@@ -294,9 +301,9 @@ class zed_to_potr():
         
         # Get the pose of the Human relative to the world frame
         # translation
-        human_translation = bodies.object_list[0].keypoint[0]
+        human_translation = bodies.object_list[body_index].keypoint[body_index]
         # orientation quaternion
-        human_orientation = bodies.object_list[0].global_root_orientation
+        human_orientation = bodies.object_list[body_index].global_root_orientation
 
         # Camera to World homogeneous transformation matrix
         H_to_W_T = np.eye(4)  # pose of the frame human relative to frame world
