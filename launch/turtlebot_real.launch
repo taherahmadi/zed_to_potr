@@ -9,6 +9,11 @@
     <param name="autorepeat_rate" value="10" />
   </node>
 
+  <node pkg="tf" type="static_transform_publisher" name="link1_broadcaster" args="0 0 0 0 0 0.707 -0.707 camera2 base_robot 100" />
+  <node pkg="tf" type="static_transform_publisher" name="link1_broadcaster" args="206.5 44 0 0 0 0.707 -0.707 odom_robot world  100" />
+  <!-- <node pkg="tf" type="static_transform_publisher" name="link1_broadcaster" args="0 0 0 0 0 0.707 -0.707 camera base_robot 100" />
+  <node pkg="tf" type="static_transform_publisher" name="link1_broadcaster" args="0 0 0 0 0 0.707 -0.707 camera base_robot 100" /> -->
+
   <node pkg="twist_mux" type="twist_mux" name="twist_mux" output="screen">
         <remap from="cmd_vel_out" to="/cmd_vel_mux/input/teleop"/>
 	<rosparam file="$(arg config_locks)"  command="load"/>

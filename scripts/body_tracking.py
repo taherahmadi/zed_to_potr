@@ -48,13 +48,6 @@ import time
 import math
 
 
-
-ADE_pose = []
-FDE_pose = []
-ADE_traj = []
-FDE_traj = []
-
-
 def quaternion_to_rotation_matrix(Q):
     """
     Covert a quaternion into a full three-dimensional rotation matrix.
@@ -103,9 +96,10 @@ class zed_to_potr():
         self.zed = sl.Camera()
         # Create a InitParameters object and set configuration parameters
         self.init_params = sl.InitParameters()
-        self.init_params.camera_resolution = sl.RESOLUTION.HD720  # Use HD7 video mode
+        self.init_params.camera_resolution = sl.RESOLUTION.HD1080  # Use HD7 video mode
         self.init_params.coordinate_units = sl.UNIT.METER          # Set coordinate units
-        self.init_params.depth_mode = sl.DEPTH_MODE.PERFORMANCE
+        self.init_params.depth_mode = sl.DEPTH_MODE.ULTRA
+        self.init_params.camera_fps = 15
         # init_params.coordinate_system = sl.COORDINATE_SYSTEM.RIGHT_HANDED_Y_DOWN
         self.init_params.coordinate_system=sl.COORDINATE_SYSTEM.RIGHT_HANDED_Z_UP # for ROS coordinate system
         self.time_retrieve = time.time()
@@ -134,7 +128,7 @@ class zed_to_potr():
         self.obj_param.enable_body_fitting = True            # Smooth skeleton move
         self.obj_param.enable_tracking = True                # Track people across images flow
         self.obj_param.detection_model = sl.DETECTION_MODEL.HUMAN_BODY_ACCURATE
-        self.obj_param.body_format = sl.BODY_FORMAT.POSE_34  # Choose the BODY_FORMAT you wish to use
+        self.obj_param.body_format = sl.BODY_FORMAT.POSE_18  # Choose the BODY_FORMAT you wish to use
 
         # Enable Object Detection module
         self.zed.enable_object_detection(self.obj_param)
@@ -142,9 +136,7 @@ class zed_to_potr():
         self.skeleton_publisher = rospy.Publisher('/pose_publisher/3DSkeletonBuffer', Skeleton3DBuffer, queue_size=1)
         # rospy.Subscriber('/potrtr/predictions', Skeleton3DBuffer, self.predictions_eval) # no longer needed
 
-        self.pc1_publisher = []
-        for i in range(5):
-            self.pc1_publisher.append(rospy.Publisher('/pose_publisher/skeleton'+str(i), PointCloud, queue_size=1))
+        self.pc1_publisher = rospy.Publisher('/pose_publisher/skeleton', PointCloud, queue_size=1)
 
         self.tf_br = tf.TransformBroadcaster()
 
@@ -158,7 +150,6 @@ class zed_to_potr():
         self.desired_framerate = 10
         self.transfrom_for_seq = {}
 
-
     def body_tracking(self):
         print("Running Body Tracking sample ... Press 'q' to quit")
 
@@ -169,9 +160,9 @@ class zed_to_potr():
         camera_info = self.zed.get_camera_information()
 
         # 2D viewer utilities
-        display_resolution = sl.Resolution(min(camera_info.camera_resolution.width, 1280), min(camera_info.camera_resolution.height, 720))
-        image_scale = [display_resolution.width / camera_info.camera_resolution.width
-                    , display_resolution.height / camera_info.camera_resolution.height]
+        # display_resolution = sl.Resolution(min(camera_info.camera_resolution.width, 1280), min(camera_info.camera_resolution.height, 720))
+        # image_scale = [display_resolution.width / camera_info.camera_resolution.width
+        #             , display_resolution.height / camera_info.camera_resolution.height]
 
         # Create OpenGL viewer
         # viewer = gl.GLViewer()
@@ -182,7 +173,7 @@ class zed_to_potr():
         # image = sl.Mat()
         
         runtime_params = sl.RuntimeParameters()
-        runtime_params.measure3D_reference_frame = sl.REFERENCE_FRAME.WORLD
+        runtime_params.measure3D_reference_frame = sl.REFERENCE_FRAME.CAMERA
 
         time0 = time.time()
         # while viewer.is_available():
@@ -219,9 +210,9 @@ class zed_to_potr():
                                         'world')
                 
                 
-                if time.time() - self.time_retrieve < 0.09:
-                    self.r.sleep()
-                    continue
+                # if time.time() - self.time_retrieve < 0.09:
+                #     self.r.sleep()
+                #     continue
                 self.time_retrieve = time.time()
 
 
@@ -234,7 +225,15 @@ class zed_to_potr():
                             dif.append(np.sum((np.array(temp[0])-np.array(body.keypoint[0]))**2, axis=0))
                         body_index = dif.index(min(dif))
                     C_to_W_T = self.publish_skeleton_tf(bodies, camera_translation, camera_orientation, body_index=body_index)
-                    self.publish_17skeleton(bodies, C_to_W_T, body_index=body_index)
+                            # change skeleton data here
+                    transformed_pose = self.pose_transform(self.zed32_to_17_format(bodies.object_list[body_index].keypoint), Transform=C_to_W_T)
+
+                    if np.isnan(transformed_pose[0:7]).any():
+                        continue
+
+                    self.pose_buffer.append(transformed_pose)
+                    self.pose_buffer = self.pose_buffer[-25:]
+                    self.publish_17skeleton(C_to_W_T)
 
                 # Update GL view
                 # viewer.update_view(image, bodies) 
@@ -253,13 +252,10 @@ class zed_to_potr():
         self.zed.disable_positional_tracking()
         self.zed.close()
 
-    def publish_17skeleton(self, bodies, C_to_W_T, body_index=0):
+    def publish_17skeleton(self, C_to_W_T):
 
         W_to_C_T = np.linalg.inv(C_to_W_T) # Pose of frame World relative to frame Camera
 
-        # change skeleton data here
-        self.pose_buffer.append(zed32_to_17_format(bodies.object_list[body_index].keypoint))
-        self.pose_buffer = self.pose_buffer[-25:]
 
         self.dt_buffer.append(time.time()-self.time_frame_rate)
         self.time_frame_rate = time.time()
@@ -269,16 +265,15 @@ class zed_to_potr():
             print("avg frame rate: ", avg_framerate)
             k = max(1,math.floor(avg_framerate/self.desired_framerate))
 
-            for i in range(5):
                 # TODO; this was wrong, we need to fix it for different frame rate
                 # print(pose_buffer[-output_size+i].shape)
                 # new_pose_in_camera = pose_transform(pose_buffer[-output_size+i].reshape(1, 17, 3), C_to_W_T)
-                self.pc1_publisher[i].publish(get_point_clouds(np.array(self.pose_buffer[-self.output_size+i]), relative_to="world"))
+            self.pc1_publisher.publish(self.get_point_clouds(np.array(self.pose_buffer[-1]), relative_to="world"))
 
             pose_buffer_msg = Skeleton3DBuffer()
             array_msg =  Float64MultiArray()
             # get_3dpose_in_camera_frame
-            output_buffer = pose_transform(np.array(self.pose_buffer[-1*self.output_size:]), Transform=W_to_C_T)
+            output_buffer = self.pose_transform(np.array(self.pose_buffer[-1*self.output_size:]), Transform=W_to_C_T)
             output_buffer_shape = output_buffer.shape
             array_msg.data = output_buffer.flatten()
 
@@ -290,7 +285,6 @@ class zed_to_potr():
             pose_buffer_msg.transform = transfrom_array_msg
             pose_buffer_msg.transform_shape = [4,4]
             self.skeleton_publisher.publish(pose_buffer_msg)
-
 
     def publish_skeleton_tf(self, bodies, camera_translation, camera_orientation, body_index=0):
         # Camera to World homogeneous transformation matrix
@@ -320,63 +314,78 @@ class zed_to_potr():
 
         h2w_R = np.eye(4)
         h2w_R[:3,:3] = human_to_world_rotation
-        self.tf_br.sendTransform( human_to_world_translation, # Human frame translation realtive to World
-                        tr.quaternion_from_matrix(h2w_R), # bodies.object_list[0].global_root_orientation, # (x, y, z, w) rotation
-                        rospy.Time.now(),
-                        'skeleton_17_pc',
-                        'world')
+        # self.tf_br.sendTransform( human_to_world_translation, # Human frame translation realtive to World
+        #                 tr.quaternion_from_matrix(h2w_R), # bodies.object_list[0].global_root_orientation, # (x, y, z, w) rotation
+        #                 rospy.Time.now(),
+        #                 'skeleton_17_pc',
+        #                 'world')
         
         return C_to_W_T
+
+    def get_point_clouds(self, skeleton_3d, relative_to="world"):
+        pc = PointCloud()
+        pc.header.stamp = rospy.Time.now()
+        pc.header.frame_id = relative_to
+        for i in range(skeleton_3d.shape[0]):
+            pc.points.append(Point32(x=skeleton_3d[i][0],y=skeleton_3d[i][1],z=skeleton_3d[i][2]))
+        return pc
+
+    def zed32_to_17_format(self, skeleton_3d):
+        skeleton_3d_17 = np.zeros((17,3))
+        if len(skeleton_3d) > 0:
+            # POSE_34
+            # body_format == sl.BODY_FORMAT.POSE_34
+            if len(skeleton_3d) == 18:
+                new_indices = [0,11,12,13,8,9,10,0,1,0,0,2,3,4,5,6,7]
+                skeleton_3d_17 = skeleton_3d[new_indices]
+                skeleton_3d_17[0] = (skeleton_3d[8]+skeleton_3d[11])/2
+                skeleton_3d_17[7] = (skeleton_3d_17[0]+skeleton_3d[1])/2
+                skeleton_3d_17[10] = (skeleton_3d[16]+skeleton_3d[17])/2
+
+            elif len(skeleton_3d) == 34:
+                # skeleton_3d_17[0] = skeleton_3d[0]
+                # skeleton_3d_17[1] = skeleton_3d[18]
+                # skeleton_3d_17[2] = skeleton_3d[19]
+                # skeleton_3d_17[3] = skeleton_3d[20]
+                # skeleton_3d_17[4] = skeleton_3d[22]
+                # skeleton_3d_17[5] = skeleton_3d[23]
+                # skeleton_3d_17[6] = skeleton_3d[24]
+                # skeleton_3d_17[7] = skeleton_3d[2]
+                # skeleton_3d_17[8] = skeleton_3d[3]
+                # skeleton_3d_17[9] = skeleton_3d[26]
+                # skeleton_3d_17[10] = skeleton_3d[27]
+                # skeleton_3d_17[11] = skeleton_3d[12]
+                # skeleton_3d_17[12] = skeleton_3d[13]
+                # skeleton_3d_17[13] = skeleton_3d[14]
+                # skeleton_3d_17[14] = skeleton_3d[5]
+                # skeleton_3d_17[15] = skeleton_3d[6]
+                # skeleton_3d_17[16] = skeleton_3d[7]
+                new_indices = [0,18,19,20,22,23,24,1,3,26,27,12,13,14,5,6,7]
+                skeleton_3d_17 = skeleton_3d[new_indices]
+                skeleton_3d_17[10] = (skeleton_3d[29]+skeleton_3d[31])/2
+                skeleton_3d_17[8] = 0.75*skeleton_3d_17[8]+0.25*skeleton_3d[27]
+        return skeleton_3d_17
+
+    def pose_transform(self, skeleton_buffer, Transform):
+        if len(skeleton_buffer.shape) > 2: 
+            skeleton_buffer = np.concatenate((skeleton_buffer, np.ones((skeleton_buffer.shape[0],skeleton_buffer.shape[1],1))),axis=2)
+            skeleton_buffer_shape = skeleton_buffer.shape
+            skeleton_buffer = np.reshape(skeleton_buffer, (skeleton_buffer_shape[0]*skeleton_buffer_shape[1],skeleton_buffer_shape[2]))
+            skeleton_buffer_t = np.transpose(skeleton_buffer)
+            skeleton_buffer_t = np.matmul(Transform, skeleton_buffer_t)
+            skeleton_buffer = np.transpose(skeleton_buffer_t)
+            skeleton_buffer = np.reshape(skeleton_buffer, (skeleton_buffer_shape[0],skeleton_buffer_shape[1],skeleton_buffer_shape[2]))
+            return skeleton_buffer[:,:,:3]
+        elif len(skeleton_buffer.shape) == 2:
+            skeleton_buffer = np.concatenate((skeleton_buffer, np.ones((skeleton_buffer.shape[0],1))),axis=1)
+            skeleton_buffer_shape = skeleton_buffer.shape
+            # skeleton_buffer = np.reshape(skeleton_buffer, (skeleton_buffer_shape[0]*skeleton_buffer_shape[1],skeleton_buffer_shape[2]))
+            skeleton_buffer_t = np.transpose(skeleton_buffer)
+            skeleton_buffer_t = np.matmul(Transform, skeleton_buffer_t)
+            skeleton_buffer = np.transpose(skeleton_buffer_t)
+            # skeleton_buffer = np.reshape(skeleton_buffer, (skeleton_buffer_shape[0],skeleton_buffer_shape[1],skeleton_buffer_shape[2]))
+            return skeleton_buffer[:,:3]
     
- 
-
-def get_point_clouds(skeleton_3d, relative_to="world"):
-    pc = PointCloud()
-    pc.header.stamp = rospy.Time.now()
-    pc.header.frame_id = relative_to
-    for i in range(skeleton_3d.shape[0]):
-        pc.points.append(Point32(x=skeleton_3d[i][0],y=skeleton_3d[i][1],z=skeleton_3d[i][2]))
-    return pc
-
-
-def zed32_to_17_format(skeleton_3d):
-    skeleton_3d_17 = np.zeros((17,3))
-    if len(skeleton_3d) > 0:
-        # POSE_34
-        # body_format == sl.BODY_FORMAT.POSE_34
-        if len(skeleton_3d) == 34:
-            # skeleton_3d_17[0] = skeleton_3d[0]
-            # skeleton_3d_17[1] = skeleton_3d[18]
-            # skeleton_3d_17[2] = skeleton_3d[19]
-            # skeleton_3d_17[3] = skeleton_3d[20]
-            # skeleton_3d_17[4] = skeleton_3d[22]
-            # skeleton_3d_17[5] = skeleton_3d[23]
-            # skeleton_3d_17[6] = skeleton_3d[24]
-            # skeleton_3d_17[7] = skeleton_3d[2]
-            # skeleton_3d_17[8] = skeleton_3d[3]
-            # skeleton_3d_17[9] = skeleton_3d[26]
-            # skeleton_3d_17[10] = skeleton_3d[27]
-            # skeleton_3d_17[11] = skeleton_3d[12]
-            # skeleton_3d_17[12] = skeleton_3d[13]
-            # skeleton_3d_17[13] = skeleton_3d[14]
-            # skeleton_3d_17[14] = skeleton_3d[5]
-            # skeleton_3d_17[15] = skeleton_3d[6]
-            # skeleton_3d_17[16] = skeleton_3d[7]
-            new_indices = [0,18,19,20,22,23,24,1,3,26,27,12,13,14,5,6,7]
-            skeleton_3d_17 = skeleton_3d[new_indices]
-            skeleton_3d_17[10] = (skeleton_3d[29]+skeleton_3d[31])/2
-            skeleton_3d_17[8] = 0.75*skeleton_3d_17[8]+0.25*skeleton_3d[27]
-    return skeleton_3d_17
-
-def pose_transform(skeleton_buffer, Transform):
-    skeleton_buffer = np.concatenate((skeleton_buffer, np.ones((skeleton_buffer.shape[0],skeleton_buffer.shape[1],1))),axis=2)
-    skeleton_buffer_shape = skeleton_buffer.shape
-    skeleton_buffer = np.reshape(skeleton_buffer, (skeleton_buffer_shape[0]*skeleton_buffer_shape[1],skeleton_buffer_shape[2]))
-    skeleton_buffer_t = np.transpose(skeleton_buffer)
-    skeleton_buffer_t = np.matmul(Transform, skeleton_buffer_t)
-    skeleton_buffer = np.transpose(skeleton_buffer_t)
-    skeleton_buffer = np.reshape(skeleton_buffer, (skeleton_buffer_shape[0],skeleton_buffer_shape[1],skeleton_buffer_shape[2]))
-    return skeleton_buffer[:,:,:3]
 
 
 
