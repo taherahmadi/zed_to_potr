@@ -41,9 +41,11 @@ from pose_publisher.msg import Skeleton3D17
 from pose_publisher.msg import Skeleton3DBuffer
 from zed_interfaces.msg import Keypoint3D
 from sensor_msgs.msg import PointCloud
-from geometry_msgs.msg import Point32
 import tf
-import tf.transformations as tr
+from costmap_converter.msg import ObstacleArrayMsg, ObstacleMsg
+from geometry_msgs.msg import Point32, QuaternionStamped, Quaternion, TwistWithCovariance
+from tf.transformations import quaternion_from_euler
+
 import time
 import math
 from datetime import datetime
@@ -145,8 +147,9 @@ class zed_to_potr():
 
         self.skeleton_publisher = rospy.Publisher('/pose_publisher/3DSkeletonBuffer', Skeleton3DBuffer, queue_size=1)
         # rospy.Subscriber('/potrtr/predictions', Skeleton3DBuffer, self.predictions_eval) # no longer needed
-
         self.pc1_publisher = rospy.Publisher('/pose_publisher/skeleton', PointCloud, queue_size=1)
+        self.obstacle_publisher = rospy.Publisher('/pose_publisher/obstacles', ObstacleArrayMsg, queue_size=1)
+
 
         self.tf_br = tf.TransformBroadcaster()
 
@@ -241,12 +244,15 @@ class zed_to_potr():
                             dif.append(np.sum((np.array(temp[0])-np.array(body.keypoint[0]))**2, axis=0))
                         body_index = dif.index(min(dif))
                     C_to_W_T = self.publish_skeleton_tf(bodies, camera_translation, camera_orientation, body_index=body_index)
-                            # change skeleton data here
+                    # change skeleton data here
                     transformed_pose = self.pose_transform(self.zed32_to_17_format(bodies.object_list[body_index].keypoint), Transform=C_to_W_T)
 
                     if np.isnan(transformed_pose[0:7]).any():
                         continue
-
+                    
+                    self.publish_dynamic_obstacle(transformed_pose, bodies.object_list[0].global_root_orientation,
+                                                       bodies.object_list[body_index].velocity)
+                    
                     self.pose_buffer.append(transformed_pose)
                     self.pose_buffer = self.pose_buffer[-25:]
                     self.publish_17skeleton(C_to_W_T)
@@ -267,6 +273,46 @@ class zed_to_potr():
         self.zed.disable_object_detection()
         self.zed.disable_positional_tracking()
         self.zed.close()
+
+    def publish_dynamic_obstacle(self, transformed_pose, orientation, velocity):
+
+        y_0 = -3.0
+        vel_x = 0.3
+        vel_y = 0.3
+        range_y = 6.0
+
+        obstacle_msg = ObstacleArrayMsg() 
+        obstacle_msg.header.stamp = rospy.Time.now()
+        obstacle_msg.header.frame_id = "world" # CHANGE HERE: odom/map
+        
+        # Add point obstacle
+        obstacle_msg.obstacles.append(ObstacleMsg())
+        obstacle_msg.obstacles[0].id = 99
+        obstacle_msg.obstacles[0].polygon.points = [Point32()]
+        obstacle_msg.obstacles[0].polygon.points[0].x = transformed_pose[0,0]
+        obstacle_msg.obstacles[0].polygon.points[0].y = transformed_pose[0,1]
+        obstacle_msg.obstacles[0].polygon.points[0].z = transformed_pose[0,2]
+
+        yaw = math.atan2(vel_y, vel_x)
+        q = tf.transformations.quaternion_from_euler(0,0,yaw)
+        obstacle_msg.obstacles[0].orientation = Quaternion(*q)
+
+        obstacle_msg.obstacles[0].velocities.twist.linear.x = vel_x
+        obstacle_msg.obstacles[0].velocities.twist.linear.y = vel_y
+        obstacle_msg.obstacles[0].velocities.twist.linear.z = 0
+        obstacle_msg.obstacles[0].velocities.twist.angular.x = 0
+        obstacle_msg.obstacles[0].velocities.twist.angular.y = 0
+        obstacle_msg.obstacles[0].velocities.twist.angular.z = 0
+
+        t = 0.1
+        # Vary y component of the point obstacle
+        if (vel_y >= 0):
+            obstacle_msg.obstacles[0].polygon.points[0].y = y_0 + (vel_y*t)%range_y
+        else:
+            obstacle_msg.obstacles[0].polygon.points[0].y = y_0 + (vel_y*t)%range_y - range_y
+            
+        self.obstacle_publisher.publish(obstacle_msg)
+
 
     def publish_17skeleton(self, C_to_W_T):
 

@@ -1,16 +1,12 @@
 <launch>
   <include file="$(find turtlebot_bringup)/launch/minimal.launch" />
-    <arg name="config_topics" default="$(find follow_ahead_rl)/config/twist_mux_topics.yaml"/>  
+  <include file="$(find zed_wrapper)/launch/zed2.launch" />
+   <arg name="config_topics" default="$(find follow_ahead_rl)/config/twist_mux_topics.yaml"/>  
     <arg name="config_locks"  default="$(find twist_mux)/config/twist_mux_locks.yaml"/>
 
-  <node pkg="joy" type="joy_node" name="joy_node" output="screen">
-    <remap from="/joy" to="/teleop/joy" />
-    <param name="dev" type="string" value="/dev/input/js0" />
-    <param name="autorepeat_rate" value="10" />
-  </node>
 
-  <node pkg="tf" type="static_transform_publisher" name="link1_broadcaster" args="0 0 0 0 0 0.707 -0.707 camera2 base_robot 100" />
-  <node pkg="tf" type="static_transform_publisher" name="link1_broadcaster" args="206.5 44 0 0 0 0.707 -0.707 odom_robot world  100" />
+  <node pkg="tf" type="static_transform_publisher" name="zed2_base_robot_broadcaster" args="0 0 0 0 0 0 1 zed2_base_link base_robot 100"/>
+  <node pkg="tf" type="static_transform_publisher" name="link_world_map" args="-0.18 2.21 0 0 0 0.707 0.707 world map 100"/>
   <!-- <node pkg="tf" type="static_transform_publisher" name="link1_broadcaster" args="0 0 0 0 0 0.707 -0.707 camera base_robot 100" />
   <node pkg="tf" type="static_transform_publisher" name="link1_broadcaster" args="0 0 0 0 0 0.707 -0.707 camera base_robot 100" /> -->
 
@@ -21,13 +17,5 @@
     </node>
 
   <node pkg="topic_tools" type="mux" name="mux" args="sel_cmdvel auto_cmdvel teleop_cmd_vel" output="screen"/>
-  
-  <node pkg="teleop_twist_joy" type="teleop_node" name="teleop_node">
-    <remap from="joy" to="teleop/joy" />
-    <remap from="cmd_vel" to="teleop_cmd_vel" />
-    <param name="enable_button" value="0" />
-    <param name="scale_angular" value="6" />
-    <param name="scale_linear" value="1" />
-  </node>
 
 </launch>
