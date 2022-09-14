@@ -46,7 +46,16 @@ import tf
 import tf.transformations as tr
 import time
 import math
+from datetime import datetime
+from pathlib import Path
 
+import argparse
+ 
+parser = argparse.ArgumentParser(description="zed to 17 keypoint format body pose",
+                                 formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+parser.add_argument("-v", "--verbose", action="store_true", help="increase verbosity")
+parser.add_argument("-s", "--svo", help="use svo input file instead of live zed input")
+parser.add_argument("-o", "--output", help="output directory to save image frames")
 
 def quaternion_to_rotation_matrix(Q):
     """
@@ -91,7 +100,8 @@ def quaternion_to_rotation_matrix(Q):
 
 class zed_to_potr():
 
-    def __init__(self):
+    def __init__(self, args):
+        self.args = args
         # Create a Camera object
         self.zed = sl.Camera()
         # Create a InitParameters object and set configuration parameters
@@ -107,7 +117,7 @@ class zed_to_potr():
 
         # If applicable, use the SVO given as parameter
         # Otherwise use ZED live stream
-        if len(sys.argv) == 2:
+        if (self.args['svo']):
             filepath = sys.argv[1]
             print("Using SVO file: {0}".format(filepath))
             self.init_params.svo_real_time_mode = True
@@ -160,9 +170,9 @@ class zed_to_potr():
         camera_info = self.zed.get_camera_information()
 
         # 2D viewer utilities
-        # display_resolution = sl.Resolution(min(camera_info.camera_resolution.width, 1280), min(camera_info.camera_resolution.height, 720))
-        # image_scale = [display_resolution.width / camera_info.camera_resolution.width
-        #             , display_resolution.height / camera_info.camera_resolution.height]
+        display_resolution = sl.Resolution(min(camera_info.camera_resolution.width, 1280), min(camera_info.camera_resolution.height, 720))
+        image_scale = [display_resolution.width / camera_info.camera_resolution.width
+                    , display_resolution.height / camera_info.camera_resolution.height]
 
         # Create OpenGL viewer
         # viewer = gl.GLViewer()
@@ -170,7 +180,7 @@ class zed_to_potr():
 
         # Create ZED objects filled in the main loop
         bodies = sl.Objects()
-        # image = sl.Mat()
+        image = sl.Mat()
         
         runtime_params = sl.RuntimeParameters()
         runtime_params.measure3D_reference_frame = sl.REFERENCE_FRAME.CAMERA
@@ -188,7 +198,7 @@ class zed_to_potr():
             else:
 
                 # Retrieve left image
-                # self.zed.retrieve_image(image, sl.VIEW.LEFT, sl.MEM.CPU, display_resolution)
+                self.zed.retrieve_image(image, sl.VIEW.LEFT, sl.MEM.CPU, display_resolution)
                 # Retrieve objects
                 self.zed.retrieve_objects(bodies, obj_runtime_param)
 
@@ -209,6 +219,12 @@ class zed_to_potr():
                                         'camera',
                                         'world')
                 
+
+                if (self.args['output']):
+                    output_dir = Path(__file__).parent.resolve().parents[0].joinpath(self.args['output'])
+                    Path(output_dir).mkdir(parents=True, exist_ok=True)
+                    filename=str(output_dir)+"/zed_"+datetime.now().strftime("%Y%m%d-%H%M%S")+".jpg"
+                    cv2.imwrite(filename, image.get_data())
                 
                 # if time.time() - self.time_retrieve < 0.09:
                 #     self.r.sleep()
@@ -390,11 +406,14 @@ class zed_to_potr():
 
 
 if __name__ == "__main__":
+    args = parser.parse_args()
+    config = vars(args)
+
 
     #ros node initialization 
     rospy.init_node('pose_publisher', anonymous=True)
 
-    pose_publisher = zed_to_potr()
+    pose_publisher = zed_to_potr(config)
     pose_publisher.body_tracking()
 
     rospy.spin()
