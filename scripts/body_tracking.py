@@ -276,10 +276,10 @@ class zed_to_potr():
 
     def publish_dynamic_obstacle(self, transformed_pose, orientation, velocity):
 
-        y_0 = -3.0
-        vel_x = 0.3
-        vel_y = 0.3
-        range_y = 6.0
+        # y_0 = -3.0
+        vel_x = velocity[0]
+        vel_y = velocity[1]
+        # range_y = 6.0
 
         obstacle_msg = ObstacleArrayMsg() 
         obstacle_msg.header.stamp = rospy.Time.now()
@@ -293,9 +293,10 @@ class zed_to_potr():
         obstacle_msg.obstacles[0].polygon.points[0].y = transformed_pose[0,1]
         obstacle_msg.obstacles[0].polygon.points[0].z = transformed_pose[0,2]
 
-        yaw = math.atan2(vel_y, vel_x)
-        q = tf.transformations.quaternion_from_euler(0,0,yaw)
-        obstacle_msg.obstacles[0].orientation = Quaternion(*q)
+        # yaw = math.atan2(vel_y, vel_x)
+        # q = tf.transformations.quaternion_from_euler(0,0,yaw)
+        # obstacle_msg.obstacles[0].orientation = Quaternion(*q)
+        obstacle_msg.obstacles[0].orientation = orientation
 
         obstacle_msg.obstacles[0].velocities.twist.linear.x = vel_x
         obstacle_msg.obstacles[0].velocities.twist.linear.y = vel_y
