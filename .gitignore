@@ -2,3 +2,6 @@ __pycache__/
 .vscode
 *.pyc
 *.swp
+output*
+test*
+
