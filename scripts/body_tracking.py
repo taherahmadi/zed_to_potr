@@ -35,6 +35,7 @@ import numpy as np
 import rospy
 from std_msgs.msg import String
 from std_msgs.msg import Header
+from visualization_msgs.msg import Marker
 from std_msgs.msg import Float64MultiArray
 from std_msgs.msg import MultiArrayDimension
 from pose_publisher.msg import Skeleton3D17
@@ -111,7 +112,7 @@ class zed_to_potr():
         self.init_params.camera_resolution = sl.RESOLUTION.HD1080  # Use HD7 video mode
         self.init_params.coordinate_units = sl.UNIT.METER          # Set coordinate units
         self.init_params.depth_mode = sl.DEPTH_MODE.ULTRA
-        self.init_params.camera_fps = 15
+        self.init_params.camera_fps = 30
         # init_params.coordinate_system = sl.COORDINATE_SYSTEM.RIGHT_HANDED_Y_DOWN
         self.init_params.coordinate_system=sl.COORDINATE_SYSTEM.RIGHT_HANDED_Z_UP # for ROS coordinate system
         self.time_retrieve = time.time()
@@ -148,7 +149,8 @@ class zed_to_potr():
         self.skeleton_publisher = rospy.Publisher('/pose_publisher/3DSkeletonBuffer', Skeleton3DBuffer, queue_size=1)
         # rospy.Subscriber('/potrtr/predictions', Skeleton3DBuffer, self.predictions_eval) # no longer needed
         self.pc1_publisher = rospy.Publisher('/pose_publisher/skeleton', PointCloud, queue_size=1)
-        self.obstacle_publisher = rospy.Publisher('/pose_publisher/obstacles', ObstacleArrayMsg, queue_size=1)
+        self.marker = rospy.Publisher('/circle_marker', Marker, queue_size=1)
+        self.obstacle_publisher = rospy.Publisher('/move_base_node_0/TebLocalPlannerROS/obstacles', ObstacleArrayMsg, queue_size=1)
 
 
         self.tf_br = tf.TransformBroadcaster()
@@ -276,10 +278,10 @@ class zed_to_potr():
 
     def publish_dynamic_obstacle(self, transformed_pose, orientation, velocity):
 
-        # y_0 = -3.0
+        y_0 = -3.0
         vel_x = velocity[0]
         vel_y = velocity[1]
-        # range_y = 6.0
+        range_y = 6.0
 
         obstacle_msg = ObstacleArrayMsg() 
         obstacle_msg.header.stamp = rospy.Time.now()
@@ -287,16 +289,51 @@ class zed_to_potr():
         
         # Add point obstacle
         obstacle_msg.obstacles.append(ObstacleMsg())
-        obstacle_msg.obstacles[0].id = 99
-        obstacle_msg.obstacles[0].polygon.points = [Point32()]
-        obstacle_msg.obstacles[0].polygon.points[0].x = transformed_pose[0,0]
-        obstacle_msg.obstacles[0].polygon.points[0].y = transformed_pose[0,1]
-        obstacle_msg.obstacles[0].polygon.points[0].z = transformed_pose[0,2]
+        obstacle_msg.obstacles[0].header.stamp = rospy.Time.now()
+        obstacle_msg.obstacles[0].header.frame_id = "world" # CHANGE HERE: odom/map
+        obstacle_msg.obstacles[0].id = 1
+        points = [Point32() for x in range(6)]
+        limit = 0.4
+        points[0].x = transformed_pose[0,0]-limit
+        points[0].y = transformed_pose[0,1]-limit
+        points[0].z = transformed_pose[0,2]
+        points[1].x = transformed_pose[0,0]+limit
+        points[1].y = transformed_pose[0,1]-limit
+        points[1].z = transformed_pose[0,2]
+        points[2].x = transformed_pose[0,0]
+        points[2].y = transformed_pose[0,1]
+        points[2].z = transformed_pose[0,2]
+        points[3].x = transformed_pose[0,0]-limit
+        points[3].y = transformed_pose[0,1]-limit
+        points[3].z = transformed_pose[0,2]+limit
+        points[4].x = transformed_pose[0,0]+limit
+        points[4].y = transformed_pose[0,1]-limit
+        points[4].z = transformed_pose[0,2]+limit
+        points[5].x = transformed_pose[0,0]
+        points[5].y = transformed_pose[0,1]
+        points[5].z = transformed_pose[0,2]+limit
+
+        
+        obstacle_msg.obstacles[0].polygon.points = points
+
+        msg = Marker()
+        msg.header = obstacle_msg.header
+        msg.type = 8
+        msg.scale.x = 0.1
+        msg.scale.y = 0.1
+        msg.scale.z = 0.1
+        msg.color.r = 0.1
+        msg.color.a = 0.5
+        msg.points = points
+        self.marker.publish(msg)
 
         # yaw = math.atan2(vel_y, vel_x)
         # q = tf.transformations.quaternion_from_euler(0,0,yaw)
         # obstacle_msg.obstacles[0].orientation = Quaternion(*q)
-        obstacle_msg.obstacles[0].orientation = orientation
+        obstacle_msg.obstacles[0].orientation.x = 0
+        obstacle_msg.obstacles[0].orientation.y = 0
+        obstacle_msg.obstacles[0].orientation.z = 0
+        obstacle_msg.obstacles[0].orientation.w = 1
 
         obstacle_msg.obstacles[0].velocities.twist.linear.x = vel_x
         obstacle_msg.obstacles[0].velocities.twist.linear.y = vel_y

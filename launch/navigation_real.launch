@@ -1,9 +1,9 @@
 <launch>
   <arg name="base_frame" value="base_robot" />
-  <arg name="odom_frame" value="world" />
-  <arg name="map_frame" value="world" />
+  <arg name="odom_frame" value="odom_zed" />
+  <arg name="map_frame" value="map" />
   <arg name="agent_num" value="0" />
-  <arg name="odom_topic" default="odom" />
+  <arg name="odom_topic" default="/zed2/zed_node/odom" />
 
   <arg name="use_global" default="true"/>
   <arg name="use_trajectory" default="false"/>
@@ -26,7 +26,8 @@
     <remap from="/scan" to="/turtlebot2/scan" />
     <rosparam command="load" file="$(find follow_ahead_rl)/config_nav/mapper_params.yaml" />
   </node-->
-  <node pkg="tf" type="static_transform_publisher" name="link1_broadcaster" args="0 0 0 0 0 0.707 -0.707 camera2 base_robot 100" />
+  <!-- <node pkg="tf" type="static_transform_publisher" name="link1_broadcaster" args="0 0 0 0 0 0.707 -0.707 camera2 base_robot 100" /> -->
+  
   <!-- <node pkg="k" type="static_transform_publisher" name="link2_broadcaster" args="0 0 0 0 0 0 1 camera turtlebot2/odom 100" />
   <node pkg="tf" type="static_transform_publisher" name="link3_broadcaster" args="0 0 0 0 0 0 1 odom turtlebot1/odom 100" /> -->
    <!-- global planner -->
@@ -40,6 +41,7 @@
     <param name="old_navfn_behavior" value="false"/>
     <param name="orientation_window_size" value="3"/>
   </arg>
+
   <arg name="base_local_planner" default="teb_local_planner/TebLocalPlannerROS" if="$(arg use_teb)"/>
   <arg name="base_local_planner" default="base_local_planner/TrajectoryPlannerROS" if="$(arg use_trajectory)"/>
   <arg name="base_local_planner" default="dwa_local_planner/DWAPlannerROS" if="$(arg use_dwa)"/>
